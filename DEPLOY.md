@@ -30,11 +30,19 @@ Netlify UI → **Site configuration → Environment variables** → hinzufügen:
 Danach einmal neu deployen. Prüfen unter `https://DEINE-SITE.netlify.app/api/audit` (GET) —
 Antwort muss `"geminiConfigured": true, "jinaConfigured": true` zeigen.
 
-## 5. Function-Timeout erhöhen (falls Audits abbrechen)
-Ein Audit ruft die Ziel-Seite + Gemini auf und braucht typisch **8–18 Sekunden**.
-Netlify-Functions haben standardmäßig **10 s** Timeout. Falls Audits mit Timeout abbrechen:
-- Netlify UI → **Site configuration → Functions → Function timeout** → auf **26 s** setzen
-  (verfügbar ab dem Pro-Plan). Der Code ist so gebaut, dass er unter 26 s bleibt.
+## 5. ⚠️ Function-Timeout auf 26 s setzen (PFLICHT für langsame Shops)
+Ein Audit ruft die Ziel-Seite + Gemini auf und braucht typisch **9–15 Sekunden**.
+Netlify-Functions brechen bei Überschreitung mit `ERR_CONNECTION_RESET` / „Failed to fetch" ab
+(genau das passiert bei langsamen Shops wie bellerei, wenn das Timeout zu niedrig ist).
+
+**Fix:** Netlify UI → **Site configuration → Functions → Function timeout** → auf **26 s** setzen
+(ab Pro-Plan verfügbar). Der Code hat ein hartes 20-s-Budget und bleibt darunter — 26 s gibt Puffer.
+
+> Schnelle Shops (example.com) gehen auch mit dem Default; der eigene, langsamere Shop braucht die 26 s.
+
+## Redeploy
+Ist das Repo mit Netlify verbunden, löst **jeder `git push` auf `main` automatisch einen neuen Deploy aus** —
+nichts weiter zu tun. Nur das Function-Timeout (Schritt 5) ist eine einmalige UI-Einstellung.
 
 ## 6. Lokaler Test
 ```bash

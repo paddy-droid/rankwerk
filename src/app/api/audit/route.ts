@@ -128,7 +128,7 @@ async function probeSite(url: string): Promise<{
     const start = Date.now();
     try {
       const res = await fetchWithTimeout(url, {
-        timeoutMs: 9000,
+        timeoutMs: 7000,
         redirect: "follow",
         headers: {
           "User-Agent": BROWSER_UA,
@@ -159,7 +159,14 @@ async function probeSite(url: string): Promise<{
         },
       };
     } catch {
-      if (attempt === 0) await new Promise((r) => setTimeout(r, 600));
+      // Retry only on a FAST failure (connection reset < 2.5s), never on a
+      // genuine timeout — otherwise a slow host would cost two full timeouts.
+      const elapsed = Date.now() - start;
+      if (attempt === 0 && elapsed < 2500) {
+        await new Promise((r) => setTimeout(r, 400));
+      } else {
+        break;
+      }
     }
   }
   return null;
@@ -287,7 +294,7 @@ async function checkFile(
 ): Promise<{ ok: boolean; body: string }> {
   try {
     const res = await fetchWithTimeout(origin + path, {
-      timeoutMs: 7000,
+      timeoutMs: 6000,
       headers: { "User-Agent": BROWSER_UA },
     });
     if (!res.ok) return { ok: false, body: "" };
@@ -307,7 +314,7 @@ async function fetchJinaReader(
   try {
     const r = await fetchWithTimeout("https://r.jina.ai/", {
       method: "POST",
-      timeoutMs: 18000,
+      timeoutMs: 9000,
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer " + key,
@@ -482,6 +489,12 @@ export async function POST(req: NextRequest) {
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
   const JINA_API_KEY = process.env.JINA_API_KEY || "";
 
+  // Hard latency budget so the function always returns before the serverless
+  // platform (Netlify) kills it. Everything downstream respects this deadline.
+  const startedAt = Date.now();
+  const BUDGET_MS = 20000;
+  const remaining = () => BUDGET_MS - (Date.now() - startedAt);
+
   try {
     const body = await req.json().catch(() => ({}));
     const rawUrl = (body as { url?: unknown }).url;
@@ -520,9 +533,10 @@ export async function POST(req: NextRequest) {
     const html = probe?.html || "";
     const signals = extractHtmlSignals(html);
 
-    // ---- Phase 2: Jina Reader ONLY as a fallback for thin/JS-rendered pages.
+    // ---- Phase 2: Jina Reader ONLY as a fallback for thin/JS-rendered pages,
+    // and only if there's enough time budget left for it + the Gemini call.
     let jina: { content: string; title: string; url: string } | null = null;
-    if ((signals.wordCount < 200 || !html) && JINA_API_KEY.length > 20) {
+    if ((signals.wordCount < 200 || !html) && JINA_API_KEY.length > 20 && remaining() > 12000) {
       jina = await fetchJinaReader(shopUrl, JINA_API_KEY);
     }
     const jinaContent = jina?.content || "";
@@ -565,8 +579,10 @@ export async function POST(req: NextRequest) {
     // ---- Gemini analysis (findings + summary) — non-fatal if it fails -----
     let analysis: AiAnalysis | null = null;
 
-    if (GEMINI_API_KEY.length > 20) {
-      const contentForAI = (jinaContent || textContent(html)).slice(0, 22000);
+    // Only call Gemini if we have enough of the time budget left (else the
+    // deterministic report carries the response and we never risk a timeout).
+    if (GEMINI_API_KEY.length > 20 && remaining() > 6000) {
+      const contentForAI = (jinaContent || textContent(html)).slice(0, 16000);
       const signalSummary = [
         `Plattform: ${signals.platform}`,
         `Title (${pageTitle.length} Z.): ${pageTitle || "FEHLT"}`,
@@ -586,20 +602,25 @@ export async function POST(req: NextRequest) {
         `SEITENINHALT (gekürzt):\n---\n${contentForAI}\n---\n\n` +
         "Gib NUR valides JSON zurück (keine Erklärung außenrum):\n" +
         '{"shopName":"Markenname","score":0-100,"summary":"2-3 Sätze Gesamteinschätzung","findings":[{"category":"SEO|Content|Structured Data|Performance|Trust|Conversion","severity":"critical|warning|info|good","title":"kurz","description":"konkret auf DIESEN Shop bezogen","recommendation":"konkreter nächster Schritt"}],"quickWins":["3 sofort umsetzbare Maßnahmen mit dem höchsten Hebel"]}\n' +
-        "Regeln: 6-9 findings, priorisiert nach Wirkung. Beziehe dich konkret auf die gemessenen Signale und den Content. Erfinde keine Fakten. Alles auf Deutsch.";
+        "Regeln: 5-7 findings, priorisiert nach Wirkung, knapp formuliert. Beziehe dich konkret auf die gemessenen Signale und den Content. Erfinde keine Fakten. Alles auf Deutsch.";
 
       try {
+        // Give Gemini the remaining budget minus a 2s safety margin for merge/serialize.
+        const geminiTimeout = Math.max(4000, Math.min(14000, remaining() - 2000));
         const geminiResponse = await fetchWithTimeout(
           `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
           {
             method: "POST",
-            timeoutMs: 20000,
+            timeoutMs: geminiTimeout,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               contents: [{ parts: [{ text: prompt }] }],
               generationConfig: {
                 temperature: 0.6,
-                maxOutputTokens: 3500,
+                // Cap "thinking": unbounded reasoning eats the token budget and
+                // truncates the JSON output; a small budget keeps it valid + fast.
+                thinkingConfig: { thinkingBudget: 512 },
+                maxOutputTokens: 2500,
                 responseMimeType: "application/json",
               },
             }),
