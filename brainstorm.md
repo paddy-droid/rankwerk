@@ -5,7 +5,10 @@
 
 ## 💡 Ideen / Features
 
--
+- **Blog (später)** mit:
+  - AJAX-Suche (Live-Suche ohne Seitenreload)
+  - Sticky Sidebar
+  - Inhaltsverzeichnis (TOC) links neben dem Artikel, rechts daneben der Blogtext
 
 ## 🎯 Ziel & Zielgruppe
 
@@ -17,7 +20,10 @@
 
 ## 🎨 Design & UX
 
--
+- **Hell-/Dunkelmodus** (Weiß-/Dark-Mode umschaltbar)
+- **Schriftgröße mindestens 1,0 rem** (keine winzigen Texte)
+- **Barrierefreiheit**: Kontrastfarben mindestens auf WCAG-AA-Niveau
+- **Responsive Navigation** mit sanft aufklappbaren Menüs (weiche Animation)
 
 ## ⚙️ Technik / Backend
 
@@ -29,7 +35,12 @@
 
 ## 📈 Marketing / SEO / Vermarktung
 
--
+- **Google-Bewertungs-Sterne in die Meta-Beschreibung** integrieren (Rich Snippet / Rating in den Suchergebnissen sichtbar machen)
+
+### Preise / Recht
+
+- Preise **netto** ausweisen
+- **Footer-Hinweis: Verkauf ausschließlich an B2B-Kunden** → damit kein Widerrufsrecht-Problem
 
 ## ❓ Offene Fragen
 
