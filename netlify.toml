@@ -1,0 +1,20 @@
+# Netlify configuration for Rankwerk (Next.js 16 App Router)
+# The official @netlify/plugin-nextjs is auto-installed by Netlify for Next sites
+# and turns the App Router route handlers (/api/audit) into Netlify Functions.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  # Keep the build lean; secrets scanning may flag the bundled keys otherwise.
+  SECRETS_SCAN_OMIT_KEYS = "GEMINI_API_KEY,JINA_API_KEY"
+
+# The audit route makes 2 external calls (Jina + Gemini). Give the function room.
+# (Netlify serverless functions default to 10s; raise as your plan allows.)
+[functions]
+  node_bundler = "esbuild"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"

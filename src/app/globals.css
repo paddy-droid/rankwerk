@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 8 11 17;
+    --foreground: 246 247 249;
+    --card: 15 19 28;
+    --border: 45 53 69;
+    --brand: 12 133 235;
+    --accent: 16 185 129;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: rgb(var(--background));
+    color: rgb(var(--foreground));
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  ::selection {
+    background: rgba(12, 133, 235, 0.3);
+    color: white;
+  }
+}
+
+@layer components {
+  /* Premium gradient text */
+  .text-gradient {
+    @apply bg-gradient-to-r from-brand-400 via-brand-500 to-accent-500 bg-clip-text text-transparent;
+    background-size: 200% auto;
+  }
+
+  /* Glass card */
+  .glass {
+    @apply bg-ink-900/60 backdrop-blur-xl border border-ink-700/50;
+  }
+
+  /* Premium card hover */
+  .card-hover {
+    @apply transition-all duration-300 ease-out hover:border-brand-500/50 hover:shadow-[0_0_30px_-5px_rgba(12,133,235,0.3)];
+  }
+
+  /* Grid pattern background */
+  .grid-bg {
+    background-image: 
+      linear-gradient(to right, rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 64px 64px;
+  }
+
+  /* Dot pattern background */
+  .dot-bg {
+    background-image: radial-gradient(circle, rgba(255,255,255,0.05) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+
+  /* Glow */
+  .glow-brand {
+    box-shadow: 0 0 40px -10px rgba(12, 133, 235, 0.4);
+  }
+
+  .glow-accent {
+    box-shadow: 0 0 40px -10px rgba(16, 185, 129, 0.4);
+  }
+
+  /* Custom scrollbar */
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-ink-700 rounded-full;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-ink-600;
+  }
+
+  /* Shimmer loading */
+  .shimmer {
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+    background-size: 1000px 100%;
+    @apply animate-shimmer;
+  }
+
+  /* Animated gradient border */
+  .gradient-border {
+    position: relative;
+    background: rgb(15 19 28);
+    border-radius: 16px;
+  }
+  .gradient-border::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: 17px;
+    padding: 1px;
+    background: linear-gradient(135deg, rgba(12,133,235,0.5), rgba(16,185,129,0.2), transparent);
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
