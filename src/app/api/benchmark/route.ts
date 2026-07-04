@@ -49,10 +49,6 @@ function normalizeCompUrl(raw: string): string {
   return u;
 }
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 function joinNames(names: string[]): string {
   if (names.length <= 1) return names[0] || "";
   return names.slice(0, -1).join(", ") + " und " + names[names.length - 1];
@@ -133,50 +129,24 @@ function cleanCompetitors(list: string[], ownHost: string): string[] {
   return out;
 }
 
-// Derive a plausible search query from the own audit result (brand + niche).
-function deriveQuery(own: AuditResult): string {
-  const brand = (own.shopName || "").trim();
-  let base =
-    own.stats?.pageTitle && own.stats.pageTitle !== "Fehlt" ? own.stats.pageTitle : "";
-  if (brand && base) {
-    base = base.replace(new RegExp(escapeRegExp(brand), "ig"), " ");
-  }
-  const segs = base
-    .split(/[|\-–—:•·»<>]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  base = segs.sort((a, b) => b.length - a.length)[0] || base;
+// Derive a plausible niche search query from the shop's hostname. Hostname-based
+// (not audit-based) so competitor discovery can run in PARALLEL with the own audit.
+function deriveQueryFromHost(host: string): string {
   const stop = new Set([
-    "online",
-    "shop",
-    "onlineshop",
-    "kaufen",
-    "store",
-    "der",
-    "die",
-    "das",
-    "und",
-    "für",
-    "fur",
-    "mit",
-    "dein",
-    "deine",
-    "home",
-    "startseite",
-    "willkommen",
-    "offiziell",
+    "online", "shop", "onlineshop", "store", "kaufen", "der", "die", "das",
+    "und", "für", "fur", "mit", "dein", "deine", "home", "www", "de", "at", "com",
   ]);
+  const base = baseDomain(host).split(".")[0] || host;
   const words = base
-    .split(/\s+/)
+    .split(/[-_.]+/)
     .map((w) => w.trim())
     .filter((w) => w.length > 1 && !stop.has(w.toLowerCase()))
     .slice(0, 4);
-  let core = words.join(" ").trim();
-  if (!core) core = brand || own.platform || "online";
+  const core = words.join(" ").trim() || base;
   return `${core} shop kaufen`.replace(/\s+/g, " ").trim();
 }
 
-function extractShopUrls(items: unknown[], ownHost: string): string[] {
+function extractShopUrls(items: unknown[], ownHost: string, max = 3): string[] {
   const ownBase = baseDomain(ownHost);
   const seen = new Set<string>();
   const out: string[] = [];
@@ -194,7 +164,7 @@ function extractShopUrls(items: unknown[], ownHost: string): string[] {
     if (seen.has(base)) continue;
     seen.add(base);
     out.push("https://" + host);
-    if (out.length >= 3) break;
+    if (out.length >= max) break;
   }
   return out;
 }
@@ -202,8 +172,9 @@ function extractShopUrls(items: unknown[], ownHost: string): string[] {
 // Jina Search → up to 3 real competitor shop domains. Tolerant: any failure
 // (no key, Cloudflare, 000, bad JSON) yields 0 competitors + a clear note.
 async function discoverCompetitors(
-  own: AuditResult,
-  ownHost: string
+  query: string,
+  ownHost: string,
+  max = 3
 ): Promise<{ urls: string[]; note?: string }> {
   const key = process.env.JINA_API_KEY || "";
   if (key.length < 20) {
@@ -212,11 +183,10 @@ async function discoverCompetitors(
       note: "Automatische Konkurrenzsuche nicht verfügbar (Jina nicht konfiguriert). Gib Konkurrenten einfach manuell ein.",
     };
   }
-  const query = deriveQuery(own);
   try {
     const r = await fetchWithTimeout("https://s.jina.ai/", {
       method: "POST",
-      timeoutMs: 12000,
+      timeoutMs: 8000,
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer " + key,
@@ -238,7 +208,7 @@ async function discoverCompetitors(
       : Array.isArray(results)
         ? results
         : [];
-    const urls = extractShopUrls(items, ownHost);
+    const urls = extractShopUrls(items, ownHost, max);
     if (urls.length === 0) {
       return {
         urls: [],
@@ -385,9 +355,10 @@ export async function POST(req: NextRequest) {
 
   const ownHost = hostOf(rawUrl);
 
-  // Kick off the FULL own audit immediately (with AI).
-  const ownPromise = runAudit(rawUrl);
-
+  // Benchmark scores EVERY shop deterministically (skipAi) with tight budgets, so
+  // the full multi-shop comparison stays under the serverless timeout. The head-to-head
+  // comparison uses sub-scores + checks (deterministic anyway); the full AI analysis
+  // remains available on the dashboard audit.
   let ownResult: AuditResult;
   let competitorUrls: string[] = [];
   let note: string | undefined;
@@ -401,36 +372,34 @@ export async function POST(req: NextRequest) {
         "Die angegebenen Konkurrenten konnten nicht verwendet werden (eigene Domain oder Marktplatz).";
     }
     const settled = await Promise.all([
-      ownPromise,
-      ...competitorUrls.map((c) => runAudit(c, { skipAi: true, budgetMs: 12000 })),
+      runAudit(rawUrl, { skipAi: true, budgetMs: 11000 }),
+      ...competitorUrls.map((c) => runAudit(c, { skipAi: true, budgetMs: 7000 })),
     ]);
     const own = settled[0];
     if ("error" in own) {
-      return NextResponse.json(
-        { error: own.error },
-        { status: statusForError(own.error) }
-      );
+      return NextResponse.json({ error: own.error }, { status: statusForError(own.error) });
     }
     ownResult = own;
     competitorResults = settled
       .slice(1)
       .filter((r): r is AuditResult => !("error" in r));
   } else {
-    // Auto-discovery needs the own result first to derive the search term.
-    const own = await ownPromise;
+    // Auto-discovery: run the own audit and competitor discovery IN PARALLEL
+    // (query derived from the hostname), then audit up to 2 competitors. This
+    // keeps the total bounded instead of running everything sequentially.
+    const [own, disc] = await Promise.all([
+      runAudit(rawUrl, { skipAi: true, budgetMs: 11000 }),
+      discoverCompetitors(deriveQueryFromHost(ownHost), ownHost, 2),
+    ]);
     if ("error" in own) {
-      return NextResponse.json(
-        { error: own.error },
-        { status: statusForError(own.error) }
-      );
+      return NextResponse.json({ error: own.error }, { status: statusForError(own.error) });
     }
     ownResult = own;
-    const disc = await discoverCompetitors(own, ownHost);
     competitorUrls = disc.urls;
     note = disc.note;
     if (competitorUrls.length > 0) {
       const settled = await Promise.all(
-        competitorUrls.map((c) => runAudit(c, { skipAi: true, budgetMs: 12000 }))
+        competitorUrls.map((c) => runAudit(c, { skipAi: true, budgetMs: 7000 }))
       );
       competitorResults = settled.filter((r): r is AuditResult => !("error" in r));
     }
