@@ -11,8 +11,14 @@ const features = [
   {
     icon: "📊",
     title: "GSC-Daten-Integration",
-    desc: "Verbinde die Google Search Console — der Agent sieht, welche Keywords Rankings-Chancen haben.",
-    badge: "Beta",
+    desc: "Verbinde die Google Search Console — sieh Klicks, Impressionen und Rankings der letzten 28 Tage und die Begriffe kurz vor Seite 1.",
+    badge: "Live",
+  },
+  {
+    icon: "🏆",
+    title: "Wettbewerbs-Benchmark",
+    desc: "Stell deinen Shop neben bis zu 3 Konkurrenten — Score, Sub-Scores und Kern-Checks im direkten Vergleich, inklusive Gewinnt/Verliert-Analyse.",
+    badge: "Live",
   },
   {
     icon: "🤖",

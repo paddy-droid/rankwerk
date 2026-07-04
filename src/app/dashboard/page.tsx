@@ -1,8 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Logo } from "@/components/Logo";
+import { saveAudit, getHistoryForUrl, normalizeHost } from "@/lib/history";
 
 type AuditState = "idle" | "fetching" | "analyzing" | "done" | "error";
 
@@ -54,6 +56,19 @@ function scoreColor(score: number): string {
   return score >= 70 ? "rgb(16 185 129)" : score >= 40 ? "rgb(245 158 11)" : "rgb(239 68 68)";
 }
 
+// Kleine, robuste Relativzeit ("vor 3 Std.") fuer den Verlaufs-Hinweis.
+function relTime(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const min = Math.round((Date.now() - t) / 60000);
+  if (min < 1) return "gerade eben";
+  if (min < 60) return `vor ${min} Min.`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `vor ${h} Std.`;
+  const d = Math.round(h / 24);
+  return `vor ${d} ${d === 1 ? "Tag" : "Tagen"}`;
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -70,6 +85,13 @@ export default function DashboardPage() {
   const [progressLabel, setProgressLabel] = useState("");
   const [result, setResult] = useState<AuditResult | null>(null);
   const [error, setError] = useState("");
+  const [mounted, setMounted] = useState(false);
+
+  // Erst nach dem Mount auf localStorage zugreifen (SSR-/Hydration-sicher).
+  useEffect(() => setMounted(true), []);
+
+  // Letzter gespeicherter Score fuer die aktuell eingegebene URL (nur clientseitig).
+  const lastEntry = mounted && url.trim() ? getHistoryForUrl(url).slice(-1)[0] ?? null : null;
 
   async function runAudit() {
     if (!url.trim()) return;
@@ -107,6 +129,7 @@ export default function DashboardPage() {
 
       setProgress(100);
       setResult(data);
+      saveAudit(data);
       setState("done");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler");
@@ -212,6 +235,24 @@ export default function DashboardPage() {
               <span className="px-3 py-1.5 rounded-lg bg-ink-800/50 text-ink-200 font-medium">
                 Dashboard
               </span>
+              <Link
+                href="/verlauf"
+                className="px-3 py-1.5 rounded-lg text-ink-400 hover:text-white transition-colors"
+              >
+                Verlauf
+              </Link>
+              <Link
+                href="/benchmark"
+                className="px-3 py-1.5 rounded-lg text-ink-400 hover:text-white transition-colors"
+              >
+                Benchmark
+              </Link>
+              <Link
+                href="/gsc"
+                className="px-3 py-1.5 rounded-lg text-ink-400 hover:text-white transition-colors"
+              >
+                Search Console
+              </Link>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -287,6 +328,25 @@ export default function DashboardPage() {
             </button>
           </div>
         </div>
+
+        {/* Letzter Score aus dem Verlauf (dezenter Hinweis) */}
+        {lastEntry && state !== "fetching" && state !== "analyzing" && (
+          <div className="-mt-4 mb-8 flex items-center gap-2 text-xs text-ink-500">
+            <span
+              className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+              style={{ background: scoreColor(lastEntry.score) }}
+            />
+            <span>
+              Letzter Score für{" "}
+              <span className="text-ink-300">{normalizeHost(url)}</span>:{" "}
+              <span className="text-ink-200 font-medium">{lastEntry.score}/100</span>{" "}
+              ({relTime(lastEntry.timestamp)}) ·{" "}
+              <Link href="/verlauf" className="text-brand-400 hover:underline">
+                Verlauf ansehen
+              </Link>
+            </span>
+          </div>
+        )}
 
         {/* Progress */}
         {(state === "fetching" || state === "analyzing") && (
