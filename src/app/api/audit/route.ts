@@ -43,6 +43,23 @@ interface Performance {
   htmlKb: number;
 }
 
+interface SecurityHeaders {
+  hsts: boolean;
+  csp: boolean;
+  xContentTypeOptions: boolean;
+  xFrameOptions: boolean;
+  referrerPolicy: boolean;
+  permissionsPolicy: boolean;
+  xPoweredBy: string; // non-empty = stack leaked
+  xXssProtectionDeprecated: boolean; // present = deprecated header still set
+}
+
+interface LlmsTxt {
+  present: boolean;
+  valid: boolean;
+  detail: string;
+}
+
 interface AiAnalysis {
   shopName?: string;
   score?: number;
@@ -70,6 +87,8 @@ interface AuditResult {
   };
   subScores: SubScore[];
   performance: Performance;
+  security: SecurityHeaders;
+  llmsTxt: LlmsTxt;
   checks: CheckItem[];
   techStack: string[];
   quickWins: string[];
@@ -121,6 +140,7 @@ const BROWSER_UA =
 // Retries once — some hosts intermittently reset the first bot connection.
 async function probeSite(url: string): Promise<{
   perf: Performance;
+  security: SecurityHeaders;
   html: string;
   ok: boolean;
 } | null> {
@@ -143,6 +163,7 @@ async function probeSite(url: string): Promise<{
       const bytes = buf.byteLength;
       const html = new TextDecoder("utf-8").decode(buf.slice(0, 600_000));
       const finalUrl = res.url || url;
+      const h = res.headers;
       return {
         ok: res.ok,
         html,
@@ -152,10 +173,20 @@ async function probeSite(url: string): Promise<{
           totalMs: total,
           finalUrl,
           redirected: finalUrl.replace(/\/$/, "") !== url.replace(/\/$/, ""),
-          server: res.headers.get("server") || res.headers.get("x-powered-by") || "unbekannt",
+          server: h.get("server") || h.get("x-powered-by") || "unbekannt",
           https: finalUrl.startsWith("https://"),
-          contentType: res.headers.get("content-type") || "",
+          contentType: h.get("content-type") || "",
           htmlKb: Math.round(bytes / 1024),
+        },
+        security: {
+          hsts: !!h.get("strict-transport-security"),
+          csp: !!(h.get("content-security-policy") || h.get("content-security-policy-report-only")),
+          xContentTypeOptions: /nosniff/i.test(h.get("x-content-type-options") || ""),
+          xFrameOptions: !!h.get("x-frame-options"),
+          referrerPolicy: !!h.get("referrer-policy"),
+          permissionsPolicy: !!h.get("permissions-policy"),
+          xPoweredBy: h.get("x-powered-by") || "",
+          xXssProtectionDeprecated: !!h.get("x-xss-protection"),
         },
       };
     } catch {
@@ -339,12 +370,48 @@ function clamp(n: number, lo = 0, hi = 100): number {
   return Math.max(lo, Math.min(hi, Math.round(n)));
 }
 
+// Count how many of the recommended security headers are set.
+function securityScore(sec: SecurityHeaders | null, https: boolean): number {
+  if (!sec) return https ? 60 : 20;
+  let score = 100;
+  if (!https) score -= 30;
+  if (!sec.hsts) score -= 18;
+  if (!sec.csp) score -= 16;
+  if (!sec.xContentTypeOptions) score -= 12;
+  if (!sec.xFrameOptions) score -= 10;
+  if (!sec.referrerPolicy) score -= 8;
+  if (!sec.permissionsPolicy) score -= 4;
+  if (sec.xPoweredBy) score -= 6; // leaks the tech stack
+  return score;
+}
+
+// Validate an llms.txt: reachable, plausibly formatted (Markdown, an H1,
+// at least one link/section), and not accidentally an HTML error page.
+function validateLlmsTxt(file: { ok: boolean; body: string }): LlmsTxt {
+  if (!file.ok || !file.body.trim()) {
+    return { present: false, valid: false, detail: "Fehlt" };
+  }
+  const body = file.body;
+  if (/<html|<!doctype/i.test(body)) {
+    return { present: true, valid: false, detail: "Liefert HTML statt Text" };
+  }
+  const hasH1 = /^#\s+\S/m.test(body);
+  const hasLink = /\]\(https?:\/\//.test(body) || /https?:\/\/\S+/.test(body);
+  const valid = hasH1 && hasLink;
+  return {
+    present: true,
+    valid,
+    detail: valid ? "Vorhanden & valide" : "Vorhanden, aber Format unvollständig",
+  };
+}
+
 // Deterministic, reproducible sub-scores from real signals.
 function computeSubScores(
   s: HtmlSignals,
   perf: Performance | null,
   robotsOk: boolean,
-  sitemapOk: boolean
+  sitemapOk: boolean,
+  sec: SecurityHeaders | null
 ): SubScore[] {
   // Technik & Performance
   let tech = 100;
@@ -401,6 +468,7 @@ function computeSubScores(
     { label: "Structured Data", score: clamp(schema) },
     { label: "Content", score: clamp(content) },
     { label: "Social & Trust", score: clamp(social) },
+    { label: "Sicherheit", score: clamp(securityScore(sec, !!perf?.https)) },
   ];
 }
 
@@ -409,7 +477,9 @@ function buildChecks(
   perf: Performance | null,
   robotsOk: boolean,
   sitemapOk: boolean,
-  sitemapUrls: number
+  sitemapUrls: number,
+  sec: SecurityHeaders | null,
+  llms: LlmsTxt
 ): CheckItem[] {
   return [
     { label: "HTTPS aktiv", ok: !!perf?.https, detail: perf?.https ? "Verschlüsselt" : "Kein/ungültiges HTTPS" },
@@ -445,6 +515,18 @@ function buildChecks(
       detail: s.imgCount ? `${s.imgWithAlt}/${s.imgCount} mit alt` : "Keine Bilder",
     },
     { label: "OpenGraph", ok: s.hasOgTitle && s.hasOgImage, detail: s.hasOgImage ? "Vorhanden" : "Unvollständig" },
+    // Structured AEO
+    { label: "llms.txt", ok: llms.present && llms.valid, detail: llms.detail },
+    // Security headers (work for any URL — WordPress, Shopify, Next …)
+    { label: "HSTS-Header", ok: !!sec?.hsts, detail: sec?.hsts ? "Gesetzt" : "Fehlt" },
+    { label: "Content-Security-Policy", ok: !!sec?.csp, detail: sec?.csp ? "Gesetzt" : "Fehlt" },
+    { label: "X-Content-Type-Options", ok: !!sec?.xContentTypeOptions, detail: sec?.xContentTypeOptions ? "nosniff" : "Fehlt" },
+    { label: "X-Frame-Options", ok: !!sec?.xFrameOptions, detail: sec?.xFrameOptions ? "Gesetzt" : "Fehlt" },
+    {
+      label: "Kein X-Powered-By-Leak",
+      ok: !sec?.xPoweredBy,
+      detail: sec?.xPoweredBy ? `Verrät: ${sec.xPoweredBy}` : "Sauber",
+    },
   ];
 }
 
@@ -521,17 +603,20 @@ export async function POST(req: NextRequest) {
 
     const origin = parsed.origin;
 
-    // ---- Phase 1: fast parallel signals (direct probe + robots + sitemaps).
+    // ---- Phase 1: fast parallel signals (direct probe + robots + sitemaps + llms.txt).
     // Keeps the common (server-rendered) case fast enough for serverless limits.
-    const [probe, robots, sitemapRoot, sitemapIndex] = await Promise.all([
+    const [probe, robots, sitemapRoot, sitemapIndex, llmsFile] = await Promise.all([
       probeSite(shopUrl),
       checkFile(origin, "/robots.txt"),
       checkFile(origin, "/sitemap.xml"),
       checkFile(origin, "/sitemap_index.xml"),
+      checkFile(origin, "/llms.txt"),
     ]);
 
     const html = probe?.html || "";
     const signals = extractHtmlSignals(html);
+    const security = probe?.security ?? null;
+    const llmsTxt = validateLlmsTxt(llmsFile);
 
     // ---- Phase 2: Jina Reader ONLY as a fallback for thin/JS-rendered pages,
     // and only if there's enough time budget left for it + the Gemini call.
@@ -563,8 +648,8 @@ export async function POST(req: NextRequest) {
     const pageTitle = signals.title || jina?.title || "";
     const pageUrl = probe?.perf.finalUrl || jina?.url || shopUrl;
 
-    const subScores = computeSubScores(signals, probe?.perf ?? null, robots.ok, sitemapOk);
-    const checks = buildChecks(signals, probe?.perf ?? null, robots.ok, sitemapOk, sitemapUrls);
+    const subScores = computeSubScores(signals, probe?.perf ?? null, robots.ok, sitemapOk, security);
+    const checks = buildChecks(signals, probe?.perf ?? null, robots.ok, sitemapOk, sitemapUrls, security, llmsTxt);
 
     const deterministicOverall = Math.round(
       subScores.reduce((sum, s) => sum + s.score, 0) / subScores.length
@@ -592,7 +677,10 @@ export async function POST(req: NextRequest) {
         `Wortanzahl: ${signals.wordCount}`,
         `Bilder mit Alt: ${signals.imgWithAlt}/${signals.imgCount}`,
         `OpenGraph: ${signals.hasOgImage ? "ja" : "nein"} | Canonical: ${signals.canonical ? "ja" : "nein"} | lang: ${signals.lang || "-"}`,
-        `robots.txt: ${robots.ok ? "ja" : "nein"} | sitemap: ${sitemapOk ? "ja" : "nein"}`,
+        `robots.txt: ${robots.ok ? "ja" : "nein"} | sitemap: ${sitemapOk ? "ja" : "nein"} | llms.txt: ${llmsTxt.present ? (llmsTxt.valid ? "valide" : "unvollständig") : "nein"}`,
+        security
+          ? `Security-Header — HSTS: ${security.hsts ? "ja" : "nein"}, CSP: ${security.csp ? "ja" : "nein"}, X-Content-Type-Options: ${security.xContentTypeOptions ? "ja" : "nein"}, X-Frame-Options: ${security.xFrameOptions ? "ja" : "nein"}${security.xPoweredBy ? `, X-Powered-By-Leak: ${security.xPoweredBy}` : ""}`
+          : "Security-Header: unbekannt (Probe fehlgeschlagen)",
         probe ? `Status ${probe.perf.status}, TTFB ${probe.perf.ttfbMs}ms, HTTPS ${probe.perf.https}` : "Direkt-Probe fehlgeschlagen",
       ].join("\n");
 
@@ -685,6 +773,51 @@ export async function POST(req: NextRequest) {
         title: `Nur ${signals.imgWithAlt} von ${signals.imgCount} Bildern mit Alt-Text`,
         description: "Fehlende Alt-Texte schaden Barrierefreiheit und Bilder-SEO.",
         recommendation: "Beschreibende Alt-Texte für alle Produkt- und Content-Bilder ergänzen.",
+      });
+    }
+    // Security headers
+    if (security) {
+      const missing: string[] = [];
+      if (!security.hsts) missing.push("HSTS");
+      if (!security.csp) missing.push("Content-Security-Policy");
+      if (!security.xContentTypeOptions) missing.push("X-Content-Type-Options");
+      if (!security.xFrameOptions) missing.push("X-Frame-Options");
+      if (missing.length >= 2) {
+        deterministicFindings.push({
+          category: "Sicherheit",
+          severity: missing.length >= 3 ? "warning" : "info",
+          title: `Sicherheits-Header fehlen (${missing.length})`,
+          description: `Diese empfohlenen HTTP-Sicherheits-Header sind nicht gesetzt: ${missing.join(", ")}. Das schwächt Schutz gegen Clickjacking, MIME-Sniffing und Downgrade-Angriffe.`,
+          recommendation:
+            "Header ergänzen: Strict-Transport-Security (mit preload), Content-Security-Policy, X-Content-Type-Options: nosniff, X-Frame-Options. Bei WordPress via .htaccess/mu-Plugin, bei Next.js in next.config.",
+        });
+      }
+      if (security.xPoweredBy) {
+        deterministicFindings.push({
+          category: "Sicherheit",
+          severity: "info",
+          title: "X-Powered-By verrät die Technik",
+          description: `Der Header X-Powered-By ist gesetzt (${security.xPoweredBy}) und gibt unnötig den Tech-Stack preis.`,
+          recommendation: "X-Powered-By entfernen (WordPress: unset via .htaccess/Plugin; Next.js: poweredByHeader: false).",
+        });
+      }
+    }
+    // llms.txt (AEO — für KI-Suchmaschinen / Antwort-Engines)
+    if (!llmsTxt.present) {
+      deterministicFindings.push({
+        category: "SEO",
+        severity: "info",
+        title: "Keine llms.txt vorhanden",
+        description: "Eine llms.txt hilft KI-Antwort-Engines (ChatGPT, Perplexity & Co.), die wichtigsten Inhalte des Shops zu finden und korrekt zu zitieren.",
+        recommendation: "llms.txt im Root anlegen: kurze Beschreibung + Links zu Kernseiten (Kategorien, Bestseller, Über uns, Versand/Kontakt).",
+      });
+    } else if (!llmsTxt.valid) {
+      deterministicFindings.push({
+        category: "SEO",
+        severity: "info",
+        title: "llms.txt vorhanden, aber Format unvollständig",
+        description: `Die llms.txt wurde gefunden, wirkt aber unvollständig (${llmsTxt.detail}).`,
+        recommendation: "Mit einer H1-Überschrift beginnen und die wichtigsten Seiten als Markdown-Links auflisten.",
       });
     }
 
@@ -797,6 +930,18 @@ export async function POST(req: NextRequest) {
           contentType: "",
           htmlKb: 0,
         },
+      security:
+        security ?? {
+          hsts: false,
+          csp: false,
+          xContentTypeOptions: false,
+          xFrameOptions: false,
+          referrerPolicy: false,
+          permissionsPolicy: false,
+          xPoweredBy: "",
+          xXssProtectionDeprecated: false,
+        },
+      llmsTxt,
       checks,
       techStack: signals.techStack,
       quickWins,
