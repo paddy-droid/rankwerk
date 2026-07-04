@@ -13,7 +13,7 @@
 
 ## 🔍 Audit / Analyse (was soll gecheckt werden?)
 
--
+- **llms.txt-Validator-Check**: Prüfen, ob eine `llms.txt` vorhanden und valide ist (Existenz, Erreichbarkeit, korrektes Format) und als eigener Audit-Punkt bewerten.
 
 ## 🎨 Design & UX
 
@@ -21,7 +21,11 @@
 
 ## ⚙️ Technik / Backend
 
--
+- **Security-Header angleichen**: einheitliches, sauberes Header-Setup
+  - CSP (Content-Security-Policy) setzen
+  - HSTS inkl. `preload`
+  - `X-Powered-By` entfernen (nicht verraten, dass Next.js läuft)
+  - veraltetes `X-XSS-Protection` raus (deprecated, kann sogar schaden)
 
 ## 📈 Marketing / SEO / Vermarktung
 
