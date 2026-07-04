@@ -32,6 +32,7 @@
   - HSTS inkl. `preload`
   - `X-Powered-By` entfernen (nicht verraten, dass Next.js läuft)
   - veraltetes `X-XSS-Protection` raus (deprecated, kann sogar schaden)
+  - **soll auch WordPress-Websites prüfen** (Header-Check nicht nur für Next.js, sondern für jede beliebige URL / WP-Seite)
 
 ## 📈 Marketing / SEO / Vermarktung
 
