@@ -87,6 +87,24 @@ const MARKETPLACES = [
   "t3n.",
   "medium.com",
   "shopping.google",
+  // Affiliate networks / directories / trackers — not real competitor shops.
+  "awin.",
+  "awin1.",
+  "firmenabc.",
+  "herold.",
+  "gelbeseiten.",
+  "wlw.",
+  "europages.",
+  "meinbezirk.",
+  "11880.",
+  "cylex.",
+  "dastelefonbuch.",
+  "das-telefonbuch.",
+  "apotheken-umschau.",
+  "webwiki.",
+  "similarweb.",
+  "trustedshops.",
+  "netzwerk",
 ];
 
 function isMarketplace(host: string): boolean {
@@ -129,20 +147,46 @@ function cleanCompetitors(list: string[], ownHost: string): string[] {
   return out;
 }
 
-// Derive a plausible niche search query from the shop's hostname. Hostname-based
-// (not audit-based) so competitor discovery can run in PARALLEL with the own audit.
-function deriveQueryFromHost(host: string): string {
-  const stop = new Set([
-    "online", "shop", "onlineshop", "store", "kaufen", "der", "die", "das",
-    "und", "für", "fur", "mit", "dein", "deine", "home", "www", "de", "at", "com",
-  ]);
-  const base = baseDomain(host).split(".")[0] || host;
-  const words = base
-    .split(/[-_.]+/)
+const QUERY_STOP = new Set([
+  "online", "shop", "onlineshop", "kaufen", "store", "der", "die", "das",
+  "und", "für", "fur", "mit", "dein", "deine", "home", "startseite",
+  "willkommen", "offiziell", "www", "de", "at", "com", "aus", "österreich",
+  "osterreich", "deutschland", "premium", "beste", "günstig", "guenstig",
+]);
+
+// Derive a NICHE search query from the audit's page title, keeping the product
+// words and dropping the brand (the hostname token) — a brand-only query just
+// returns the shop's own pages + directories. Falls back to the hostname.
+// NOTE: with skipAi, shopName == pageTitle, so we must NOT strip by shopName;
+// we strip the hostname token instead.
+function deriveQuery(own: AuditResult, ownHost: string): string {
+  const title = (
+    own.stats?.pageTitle && own.stats.pageTitle !== "Fehlt" ? own.stats.pageTitle : ""
+  ).replace(/&[a-z#0-9]+;/gi, " "); // strip HTML entities (&amp; etc.)
+  // Pick the longest title segment — usually the niche description, not the brand.
+  const segs = title
+    .split(/[|\-–—:•·»<>]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const base = segs.sort((a, b) => b.length - a.length)[0] || title;
+  const hostToken = (baseDomain(ownHost).split(".")[0] || "").split(/[-_]/)[0].toLowerCase();
+  let words = base
+    .split(/[\s,&/]+/)
     .map((w) => w.trim())
-    .filter((w) => w.length > 1 && !stop.has(w.toLowerCase()))
+    .filter(
+      (w) =>
+        w.length > 1 &&
+        !QUERY_STOP.has(w.toLowerCase()) &&
+        w.toLowerCase() !== hostToken
+    )
     .slice(0, 4);
-  const core = words.join(" ").trim() || base;
+  if (words.length === 0) {
+    const hostCore = baseDomain(ownHost).split(".")[0] || ownHost;
+    words = hostCore
+      .split(/[-_.]+/)
+      .filter((w) => w.length > 1 && !QUERY_STOP.has(w.toLowerCase()));
+  }
+  const core = words.join(" ").trim() || own.platform || "online";
   return `${core} shop kaufen`.replace(/\s+/g, " ").trim();
 }
 
@@ -186,11 +230,15 @@ async function discoverCompetitors(
   try {
     const r = await fetchWithTimeout("https://s.jina.ai/", {
       method: "POST",
-      timeoutMs: 8000,
+      timeoutMs: 9000,
       headers: {
         "Content-Type": "application/json",
         Authorization: "Bearer " + key,
         Accept: "application/json",
+        // Return only SERP metadata (URLs), NOT the fetched page content — this
+        // turns a ~16s call into ~2s, which is what makes auto-discovery viable
+        // inside the serverless time budget. We only need the competitor URLs.
+        "X-Respond-With": "no-content",
       },
       body: JSON.stringify({ q: query, hl: "de", gl: "at" }),
     });
@@ -384,17 +432,15 @@ export async function POST(req: NextRequest) {
       .slice(1)
       .filter((r): r is AuditResult => !("error" in r));
   } else {
-    // Auto-discovery: run the own audit and competitor discovery IN PARALLEL
-    // (query derived from the hostname), then audit up to 2 competitors. This
-    // keeps the total bounded instead of running everything sequentially.
-    const [own, disc] = await Promise.all([
-      runAudit(rawUrl, { skipAi: true, budgetMs: 11000 }),
-      discoverCompetitors(deriveQueryFromHost(ownHost), ownHost, 2),
-    ]);
+    // Auto-discovery: own audit first (fast, skipAi), then derive a NICHE query
+    // from its title and search competitors. Jina runs with X-Respond-With:no-content
+    // (~2s instead of ~16s), so the sequential flow still fits: ~7s + ~2s + ~7s.
+    const own = await runAudit(rawUrl, { skipAi: true, budgetMs: 11000 });
     if ("error" in own) {
       return NextResponse.json({ error: own.error }, { status: statusForError(own.error) });
     }
     ownResult = own;
+    const disc = await discoverCompetitors(deriveQuery(own, ownHost), ownHost, 2);
     competitorUrls = disc.urls;
     note = disc.note;
     if (competitorUrls.length > 0) {
