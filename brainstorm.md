@@ -61,6 +61,16 @@
   JSON-LD-`@type`-Extraktion, Bild-Alt-Abdeckung, OpenGraph, Plattform-/Tech-Fingerprint,
   echte Performance (TTFB/Ladezeit/Redirects). → 13 Checks + 5 Sub-Scores + KI-Findings.
 
+- **Cookie-Consent-Check (DSGVO/TTDSG)**: prüfen, ob Cookies **vor** der Einwilligung gesetzt
+  werden (Prior-Consent-Verstoß) und ob eine echte **Opt-out-/Widerruf-Möglichkeit** besteht.
+
+- **Google Fonts lokal statt CDN**: prüfen, ob Google Fonts über `fonts.googleapis.com` /
+  `fonts.gstatic.com` extern geladen werden (DSGVO-Risiko, EuGH-Urteil LG München) oder
+  bereits selbst gehostet sind.
+
+- **`/wp-admin` sichtbar (nur bei WordPress-Seiten)**: prüfen, ob der Login-Bereich öffentlich
+  erreichbar ist (kein IP-Schutz/Basic-Auth/Umbenennung), als Teil des Security-Sub-Scores.
+
 - **Sinnvolle Ergänzungen (Vorschlag):**
   - **Security-Header-Check** (siehe Carlos Punkt unter Technik) — Header liegen im Audit
     schon vor, nur noch auswerten.
