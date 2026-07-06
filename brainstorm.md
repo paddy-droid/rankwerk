@@ -75,6 +75,9 @@
 - **Schriftgröße mindestens 1,0 rem** (keine winzigen Texte)
 - **Barrierefreiheit**: Kontrastfarben mindestens auf WCAG-AA-Niveau
 - **Responsive Navigation** mit sanft aufklappbaren Menüs (weiche Animation)
+- **Footer und Navigation müssen dauerhaft verfügbar bleiben** — auch nach dem Audit-Lauf bzw.
+  im Dashboard/Verlauf/Benchmark dürfen Header-Nav und Footer nicht verschwinden oder von
+  Vollbild-Ergebnisansichten überdeckt werden (Layout-Regel für alle Unterseiten).
 
   → **Lösung:** Rankwerk ist aktuell **Dark-only**. Umschaltung = Tailwind `darkMode: "class"`
   + Toggle im Header (Präferenz in `localStorage`), Farbtokens gibt's schon (`ink/brand/accent`).
@@ -117,6 +120,11 @@
     darauf auf: „Modell-Mix + Caching macht es profitabel").
 
 ## 📈 Marketing / SEO / Vermarktung
+
+- **CTA „Beauftragen" direkt bei den gefundenen Problemen**: unter jedem Befund in der
+  „Probleme"-Ansicht einen Button/CTA anbieten, mit dem der Kunde den Fix direkt bei uns als
+  individuelle Programmierung in Auftrag geben kann. Gedacht als **Downsell** — wer nicht den
+  vollen Autopilot bucht, kauft wenigstens die punktuelle Behebung einzelner Probleme.
 
 - **Google-Bewertungs-Sterne in die Meta-Beschreibung** integrieren (Rich Snippet / Rating in den Suchergebnissen sichtbar machen)
 
