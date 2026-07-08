@@ -30,7 +30,9 @@
     finden wir über **Jina Search** (haben wir im Einsatz).
   - **Core Web Vitals** aus echten Felddaten via **Google CrUX / PageSpeed-Insights-API**
     (kostenloser Key) statt nur unserer TTFB-Messung.
-  - **PDF-/Whitelabel-Report** als Lead-Magnet (Agentur-Branding).
+  - **PDF-/Whitelabel-Report** als Lead-Magnet (Agentur-Branding). → siehe auch die
+    verbindliche Regel unter Design/UX: PDF-Export ist die einzige Ausnahme, bei der die
+    Audit-Ansicht zusätzlich (nicht statt) Footer/Nav anzeigen darf.
 
 ## 🎯 Ziel & Zielgruppe
 
@@ -83,6 +85,15 @@
   dunklere `#047857`/Gradient nehmen (dieselbe Lektion, die wir dort schon gezogen haben).
   Ironie/USP: **Rankwerk sollte seinen eigenen Audit bestehen** — Kontrast-Check ins Tool
   aufnehmen und die eigene Seite grün bekommen.
+
+- **Präzisierung zur Footer/Nav-Regel (verbindlich):** Footer und Navigation müssen **immer**
+  sichtbar bleiben — auch im Dashboard, Verlauf und Benchmark, keine Ausnahme dort.
+  **Einzige Ausnahme:** die Audit-Ergebnisansicht selbst darf zusätzlich einen
+  **PDF-Export-Button** anbieten (Report zum Versand an Kunden), das ist eine Ergänzung,
+  kein Ersatz für Footer/Nav.
+- **Grundsatz für das ganze Tool:** alles soll durchgängig **DSGVO-konform und responsive**
+  sein (kein Bereich/kein neues Feature ausgenommen) — passt zu unserem „möglichst autonom,
+  wenig Manpower, Geld verdienen"-Ziel: sauber von Anfang an, statt später nachbessern zu müssen.
 
 ## ⚙️ Technik / Backend
 
@@ -180,6 +191,14 @@
 - **Free-Tier:** Wie viele Gratis-Audits vor der Registrierung? (Lead-Gen vs. Kostenbremse)
 - **Abgrenzung zu unseren Kundenprojekten:** Rankwerk als eigenes Produkt vs. „Nichts Neues bis
   Q4 2026"-Fokus — bewusst als Nebengleis/Prototyp, oder ernster Push?
+- **Benchmark: Wortanzahl mitzählen?** Wird beim Wettbewerbsvergleich aktuell auch die
+  Wortanzahl je Seite erfasst (z. B. „wie viele Wörter hat der Konkurrent-Text")?
+
+  → **Antwort:** Aktuell **nein** — `src/app/api/benchmark/route.ts` extrahiert Wörter nur für
+  die Keyword-/Fokusbegriff-Erkennung (Zeile ~158-189), zählt aber nicht den Content-Umfang der
+  jeweiligen Seite. **Ergänzung (klein):** Wortanzahl des sichtbaren Fließtexts (Body ohne
+  Nav/Footer/Script) je verglichener URL mitzählen und im Ergebnis anzeigen — klassischer
+  Content-Tiefe-Vergleichswert, ähnlicher Aufwand wie der bestehende TTFB-Check.
 
 ## ✅ Erledigt / Entschieden
 
